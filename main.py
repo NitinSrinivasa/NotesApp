@@ -1,14 +1,38 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.security.api_key import APIKeyHeader
+from fastapi import Body
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
-
+from openai import OpenAI
 
 import crud
 import models
 import schemas
 from database import SessionLocal, engine
+
+client = OpenAI()
+
+def generate_ai_summary(query: str) -> str:
+    """
+    Generates a one-paragraph summary using GPT-4o based on the user query.
+    """
+    prompt = (
+        "Write a clear, single-paragraph note about the following topic. "
+        "Make it concise but informative:\n\n" + query
+    )
+
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": "You write high-quality notes."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.4
+    )
+
+    return response.choices[0].message.content.strip()
+
 
 
 API_KEY = "supersecretkey123"  # Change in production!
@@ -101,3 +125,20 @@ def get_user_by_username(
     _: str = Depends(verify_api_key)
 ):
     return crud.get_user_by_username(username, db)
+
+@app.post("/users/{user_id}/notes/ai-summary", response_model=schemas.NoteOut)
+def create_ai_summary_note(
+    user_id: int,
+    query: str = Body(..., embed=True),
+    db: Session = Depends(get_db),
+    _: str = Depends(verify_api_key)
+):
+    summary = generate_ai_summary(query)
+
+    note_data = schemas.NoteCreate(
+        title="AI Summary",
+        content=summary
+    )
+
+    return crud.create_note(db, note_data, user_id)
+
